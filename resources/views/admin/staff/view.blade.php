@@ -1,0 +1,636 @@
+@extends('layouts.admin')
+
+@section('css')
+.table thead td { text-align:center;font-weight:bold}
+.event-summary{padding-left: 20px;}
+.card {margin-bottom: 30px;}
+#eventModal,#eventForm {display:none;}
+@endsection
+@section('content')
+@if ($errors->any())
+    <div class="alert alert-danger">
+        <ul>
+            @foreach ($errors->all() as $error)
+                <li>{{ $error }}</li>
+            @endforeach
+        </ul>
+    </div>
+@endif
+@if ($staff)
+
+	@php($status = $staff->getAdminStatus($fromDate,$toDate))
+	@php($events = $status['events'])
+	@php($summary = $status['summary'])
+	{!! $summary !!}
+
+	@if ($events)
+
+		@foreach($events as $year => $day)
+			<h2>{{ $year }}</h2>
+			@php($thisWeek = \Carbon\Carbon::now()->weekOfYear)
+			<h2><span class="ui-icon ui-icon-arrowthick-1-s"></span> Week {{ $thisWeek }}</h2>	
+			@php($weekID = "week-".$year."-".$thisWeek)
+
+			@php($weeklyBreakMinutes = 0)
+			@php($weeklyBreakAmt = 0)
+			@php($weeklyClockTimeTotal = 0)
+			@php($weeklySummary = array())
+			@php($weekErrors = array())
+			<a href="#{{ $weekID }}-summary">Jump To Week {{ $thisWeek }} Summary</a>
+			@php($dayCount = 0)
+			@php($weekCheck = array())
+			@foreach($day as $id=>$event)
+				@if(!isset($weekCheck[$event['day']->weekOfYear]))
+					@php($weekCheck[$event['day']->weekOfYear] = array())
+				@endif
+				@php($weekCheck[$event['day']->weekOfYear][] = $id)
+			@endforeach
+
+			@foreach($day as $id=>$event)
+
+				@php($dayCount++)
+		
+				@php($dayID = "day-".$year."-".$id)
+				<a name="{{ $dayID }}"></a>
+				<div class="card">
+					<div class="card-header">
+						{{ $event['day']->format('l jS \\of F Y') }}
+					</div>
+				@php($breakMinutes = 0)
+				@php($breakAmt = 0)
+				@php($clockTimeTotal = 0)
+			<div class="card-body">
+				<div class="row">
+					<div class="col-sm-8"></div>
+					<div class="col-sm-4 right">
+						<a class="btn btn-success" onClick="addEvent();return false;">Add Event</a>
+					</div>
+				</div>
+				<table class="table table-dark">
+					<thead>
+						<td>Event Start</td>
+						<td>Event End</td>
+						<td>Event Type</td>
+						<td>Time</td>
+						<td>Edited</td>
+						<td>Manage</td>
+					</thead>
+					<tbody>
+				@php($breaks = $event['breaks'])
+				@php($clocks = $event['clocks'])
+				@php($clockStart = 0)
+				@php($clockEnd = 0)
+				@php($firstClock=0)
+				@php($lastClock=0)
+
+				@foreach($clocks as $clock)
+					@if ($clock->action == "clockin" && !$clockStart)
+						@php($clockStart = $clock->time)
+						@php($firstClock = $clock->time)
+					@endif
+
+					@if ($clock->action == "clockout")
+						@if(!$clockEnd)
+							@php($clockEnd = $clock->time)
+						@endif
+					@endif
+
+					@php($tmpClockTime)
+					@if ($clockEnd && $clockStart)
+						@php($tmpClockTime = \Carbon\Carbon::parse($clockEnd)->diffInMinutes(\Carbon\Carbon::parse($clockStart)))
+						@php($clockTimeTotal += $tmpClockTime)
+						@php($lastClock = $clockEnd)
+						@php($clockEnd = 0)
+						@php($clockStart = 0)
+					@endif
+
+					@if ($clock->action == "clockout")
+
+
+						<tr class="{{ $clock->action }}">
+							<td></td>
+							<td>{{ $clock->time }}</td>
+							<td>{{ $clock->action }}</td>
+							<td>{{ \App\Staff::convertMinsToTime((float)$clockTimeTotal-(float)$breakMinutes) }}</td>
+							<td>@if($clock->editor){{ $adminUsers[$clock->editor] }}@endif</td>
+							<td><a href="#" onClick="return editEvent('clockout',[{{ $clock->id }}])" class="btn btn-warning" href="#ajaxEditClockOut">Edit</a></td>
+						</tr>
+					@endif
+
+				@endforeach
+				
+				@php($dayErrors = array())
+				@if ($clockStart && !$clockEnd)
+					@if(\Carbon\Carbon::parse($clockStart)->dayOfYear == \Carbon\Carbon::now()->dayOfYear)
+						@php($clockTimeTotal += \Carbon\Carbon::parse($clockStart)->	diffInMinutes(\Carbon\Carbon::now()))
+					@else
+						@php($dayErrors[] = "Clock in found but no clock out found")
+					@endif
+				@endif
+
+
+				@foreach($breaks as $break)
+				<tr class="@if(!$break['end'] || !$break['end']->time) breakend @else breakstart @endif">
+					<?php
+						$breakStartID = 0;
+						$breakStartTime = 0;
+						$breakEndID = 0;
+						$breakEndTime = 0;
+						$breakDiff = 0;
+						if ($break['start']) {
+							$breakStartID = $break['start']->id;
+							$breakStartTime = $break['start']->time;
+						}
+						if($break['end']) {
+							$breakEndID = $break['end']->id;
+							$breakEndTime = $break['end']->time;
+						} else {
+							$breakEndTime = \Carbon\Carbon::now();
+						}
+						if ($breakEndTime && $breakStartTime)
+							$breakDiff = \Carbon\Carbon::parse($breakStartTime)->diffInMinutes($breakEndTime);
+						$breakAmt++;
+						$breakMinutes+= $breakDiff;
+					?>
+					<td>{{ $breakStartTime }}</td>
+					<td>{{ $breakEndTime }}</td>
+					<td>Break</td>
+					<td>{{ $breakDiff }} minutes</td>
+					<td>@php($isEdited = false)
+						@if($break['end']->editor)
+							@php($isEdited = true)
+							{{ $adminUsers[$break['end']->editor] }}
+						@endif
+						@if(!$isEdited)
+							@if($break['start']->editor)
+								{{ $adminUsers[$break['start']->editor] }}
+							@endif
+						@endif
+					</td>
+					<td><a class="btn btn-warning" href="#" onClick="return editEvent('break',[{{ $breakStartID }}, {{ $breakEndID }}]);">Edit</a></td>
+				</tr>
+				@endforeach
+
+				@php($currentWeekOfYear = 0)
+				@php($clockInCnt = 0)
+				@php($clockOutCnt = 0)
+				@foreach($clocks as $clock)
+					@if($clock->action == 'clockin')
+					<tr class="{{ $clock->action }}">
+						<td>{{ $clock->time }}</td>
+						<td></td>
+						<td>{{ $clock->action }}</td>
+						<td></td>
+						<td>@if($clock->editor){{ $adminUsers[$clock->editor] }}@endif</td>
+						<td><a href="#" onClick="return editEvent('clockin',[{{ $clock->id }}])" class="btn btn-warning" href="#ajaxEditClockOut">Edit</a></td>
+					</tr>
+						@if ($lastClock && \Carbon\Carbon::parse($clock->time)->timestamp > \Carbon\Carbon::parse($lastClock)->timestamp)
+							@php($dayErrors[] = "Last clockin is after the last clock out")
+						@endif
+						@php($clockInCnt++)
+					@else
+						@php($clockOutCnt++)
+					@endif
+				@endforeach
+				@if($clockInCnt>1)
+					@php($dayErrors[] = "Multiple clock in events found")
+				@endif
+				@if($clockOutCnt>1)
+					@php($dayErrors[] = "Multiple clock out events found")
+				@endif
+				@if($clockInCnt>$clockOutCnt)
+					@php($dayErrors[] = "More clock in events found than clock out events")
+				@endif
+				@if($clockInCnt<$clockOutCnt)
+					@php($dayErrors[] = "More clock out events found than clock in events")
+				@endif
+					</tbody>
+				</table>
+
+				<div class="card">
+					<div class="card-header">
+						Summary For {{ $event['day']->format('l') }}
+					</div>
+					<div class="card-body">
+						<div class="row">
+							<div class="col-sm-4 left">
+								<h5>Breaks</h5>
+								<strong>Total</strong> <span class="timeSubTotal">{{ $breakAmt }}</span><br/>
+								<strong>Minutes</strong> <span class="timeTotal">{{ \App\Staff::convertMinsToTime($breakMinutes) }}</span>
+							</div>
+							<div class="col-sm-8 right">
+								<h5>Hours</h5>
+								<strong>Total Before Breaks</strong> <span class="timeSubTotal">{{ \App\Staff::convertMinsToTime($clockTimeTotal) }}</span>	<br/>
+								<strong>Total After Breaks</strong> <span class="timeTotal">{{ \App\Staff::convertMinsToTime((float)$clockTimeTotal-(float)$breakMinutes) }}</span>	
+
+								@php($weeklySummary[$event['day']->format('l')] = array("break_amt"=>$breakAmt,"break_minutes"=>$breakMinutes,"hours_all"=>\App\Staff::convertMinsToTime((float)$clockTimeTotal),"hours_after"=>\App\Staff::convertMinsToTime((float)$clockTimeTotal-(float)$breakMinutes),'first_clock'=>$firstClock,'last_clock'=>$lastClock,'errors'=>sizeof($dayErrors),'id'=>$dayID))
+
+								@php($weeklyBreakAmt += $breakAmt)
+								@php($weeklyBreakMinutes += $breakMinutes)
+								@php($weeklyClockTimeTotal += $clockTimeTotal)
+							</div>
+						</div>
+					</div>
+					@if($dayErrors)
+						@foreach($dayErrors as $error)
+						<div class="card-footer">
+							<div class="alert alert-danger">{{ $error }}</div>
+						</div>
+						@php($weekErrors[] = "<a href='#".$dayID."'>".$event['day']->format('l jS \\of F Y').": ".$error."</a>")
+						@endforeach
+					@endif
+				</div>
+
+
+				@if ($event['day']->dayOfWeek == 1 || $dayCount == sizeof($day) || $id == $weekCheck[$event['day']->weekOfYear][sizeof($weekCheck[$event['day']->weekOfYear])-1])
+				<a name="{{ $weekID }}-summary"></a>
+
+				<div class="card">
+					<div class="card-header">
+						Summary For Week {{ $event['day']->weekOfYear }} ({{ $event['day']->format('d-m-Y') }} - {{ $event['day']->endOfWeek()->format('d-m-Y') }})
+					</div>
+					<div class="card-body">
+						<div class="row">
+							<div class="col-sm-12">
+								<table class="table">
+									<thead>
+										<th>Day</th>
+										<th>Clock In</th>
+										<th>Clock Out</th>
+										<th>Breaks</th>
+										<th>Break Mins</th>
+										<th>Hours Total</th>
+										<th>Hours After Breaks</th>
+										<th>Errors</th>
+									</thead>
+									<tbody>
+										@php($weekErrorCnt = 0)
+										@foreach($weeklySummary as $daySum=>$dayVal)
+											<tr @if($dayVal['errors']) class="errors" @endif >
+												<td><a href="#{{ $dayVal['id'] }}">{{ $daySum }}</a></td>
+												<td>@if($dayVal['first_clock']){{ \Carbon\Carbon::parse($dayVal['first_clock'])->toTimeString()}}@endif</td>
+												<td>@if($dayVal['last_clock']){{ \Carbon\Carbon::parse($dayVal['last_clock'])->toTimeString()}}@endif</td>
+												<td>{{ $dayVal['break_amt'] }}</td>
+												<td>{{ \App\Staff::convertMinsToTime($dayVal['break_minutes']) }}</td>
+												<td>{{ $dayVal['hours_all'] }}</td>
+												<td>{{ $dayVal['hours_after'] }}</td>
+												<td>{{ $dayVal['errors'] }}@php($weekErrorCnt+=$dayVal['errors'])</td>
+											</tr>
+										@endforeach
+										<tr>
+											<td><strong>Totals</strong></td>
+											<td></td>
+											<td></td>
+											<td>{{ $weeklyBreakAmt }}</td>
+											<td>{{ \App\Staff::convertMinsToTime($weeklyBreakMinutes) }}</td>
+											<td>{{ \App\Staff::convertMinsToTime((float)$weeklyClockTimeTotal) }}</td>
+											<td>{{ \App\Staff::convertMinsToTime((float)$weeklyClockTimeTotal-(float)$weeklyBreakMinutes) }}</td>
+											<td>{{ $weekErrorCnt }}</td>
+										</tr>
+									</tbody>
+								</table>
+								<textarea>
+									{{ $staff->name }}: {{ \App\Staff::convertMinsToTime((float)$weeklyClockTimeTotal-(float)$weeklyBreakMinutes) }} hours
+								</textarea>
+								@php($weeklySummary = array())
+							</div>
+							@php($weeklyBreakAmt = 0)
+							@php($weeklyBreakMinutes = 0)
+							@php($weeklyClockTimeTotal = 0)
+						</div>
+					</div>
+					@if(sizeof($weekErrors))
+						<div class="card-footer">
+						@foreach($weekErrors as $error)
+							<div class="alert alert-danger">{!! $error !!}</div>
+						@endforeach
+						</div>
+						@php($weekErrors = array())
+					@endif
+				</div>
+
+					<h2><span class="ui-icon ui-icon-arrowthick-1-n"></span> Week {{ $event['day']->weekOfYear }}</h2>
+
+					@php($lastWeek = $event['day']->weekOfYear-1)
+					@if ($lastWeek < 0)
+						$lastWeek = 52
+					@endif
+			</div>
+		</div>
+		<div class="card">
+			<div class="card-body">
+					<h2><span class="ui-icon ui-icon-arrowthick-1-s"></span> Week {{ $lastWeek }}</h2>	
+					@php($weekID = "week-".$year."-".$lastWeek)
+					<a href="#{{ $weekID }}-summary">Jump To Week {{ $lastWeek }} Summary</a>						
+				@endif
+			</div>
+		</div>
+			@endforeach
+
+		@endforeach
+
+
+	@endif
+@else
+	Staff with {{ $id }} not found
+@endif
+
+<div class="modal" tabindex="-1" role="dialog" id="eventModal">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Modal title</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+      </div>
+     
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger">Delete Event</button>
+        <button type="button" class="btn btn-primary">Update Event</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+@endsection
+
+@section('javascript')
+function capitalizeFirstLetter(string) {
+    return string[0].toUpperCase() + string.slice(1);
+}
+function getEventDetails (type,events) {
+
+    $.ajax({
+       type:'POST',
+       url:'/ajax/back',
+       data:{'events':events,'request':'getEvents'},
+       success:function(data){
+
+       		if (data.success) {
+       			if (data.success.events) {
+       				console.log(data);
+       				showEventDetails(type,data.success.events);
+       			}
+       		}
+       		if (data.errors) {
+       			alert(data.errors);
+	       	}
+    	}
+	});
+	
+}
+function str_pad(n) {
+    return String("00" + n).slice(-2);
+}
+
+function showEventDetails (type,events) {
+	var pickers = [];
+
+	switch (type) {
+		case "break" : 	var breakstart, breakend;
+						$.each(events,function(id,event) {
+							if (event['action'] == 'breakstart')
+								breakstart = event;
+							if (event['action'] == 'breakend')
+								breakend = event;
+						});
+						pickers.push(
+							{'name':'Break Start','action':'breakstart','value':breakstart['time'],'id':breakstart['id']}
+						);
+						pickers.push(
+							{'name':'Break End','action':'breakend','value':breakend['time'],'id':breakend['id']}
+						);
+					   break;
+		case 'clockin':	var clockin;  
+						$.each(events,function(id,event) {
+							if (event['action'] == 'clockin')
+								clockin = event;
+						});
+						pickers.push(
+							{'name':'Clock In','action':'clockin','value':clockin['time'],'id':clockin['id']}
+						);
+						break;
+		case 'clockout':var clockout;  
+						$.each(events,function(id,event) {
+							if (event['action'] == 'clockout')
+								clockout = event;
+						}); 
+						pickers.push(
+							{'name':'Clock Out','action':'clockout','value':clockout['time'],'id':clockout['id']}
+						);
+						break;
+
+	}
+	var modal = $('#eventModal');
+	$(modal).find('.modal-body').html('');
+	$.each(pickers,function(i,picker) {
+		var div = $("<div></div>");
+		var input = $( '<input type="text" class="form-control datetimepicker"></input>' );
+		if (picker['name'])
+			$(div).prepend("<label>"+picker['name']+"</label>");
+		if (picker['action'])
+			$(input).attr('name',picker['action']);
+		if (picker['value']) {
+			var d = d = new Date(picker['value']);
+			d = (d.getFullYear()+"-"+str_pad(d.getMonth()+1)+'-'+str_pad(d.getDate())
+				+' '+str_pad(d.getHours())+':'+str_pad(d.getMinutes()));
+
+			$(input).val(d);
+		}
+		if (picker['id'])
+			$(input).attr('id',picker['id']);
+		$(div).append(input);
+		$(modal).find('.modal-body').append(div);
+	});
+	var title = capitalizeFirstLetter(type);
+	$(modal).find('.btn-danger').show();
+	$(modal).find('.btn-danger').text("Delete "+title);
+	$(modal).find('.btn-primary').text("Update "+title);
+	$(modal).find('.modal-title').text("Update "+title);
+
+	$(modal).find('.btn-danger').off('click');
+	$(modal).find('.btn-danger').click(function(e){
+		confirmAction('Are you sure you want to delete this '+type+" event?",function(){afterDeleteEvents(events)});
+	});
+	$(modal).find('.btn-primary').off('click');
+	$(modal).find('.btn-primary').click(function(e){
+		confirmAction('Are you sure you want to edit this '+type+" event?",function(){afterEditEvents(events)});
+	});
+
+	$('.datetimepicker').datetimepicker({
+		'dateFormat':'yy-mm-dd' 
+	});
+	$(modal).modal();
+}
+
+function addEvent () {
+	var modal = $('#eventModal');
+	$(modal).find('.modal-body').html('');
+	
+	var div = $("<div><input type='hidden' name='staff_id' value='{{ $staff->id }}'></div>");
+	var input = $( '<input type="text" class="form-control datetimepicker"></input>' );
+	
+	$(div).prepend("<label>Event Start</label>");
+	$(input).attr('name','startdate');
+
+	var d = d = new Date();
+	d = (d.getFullYear()+"-"+str_pad(d.getMonth()+1)+'-'+str_pad(d.getDate())
+		+' '+str_pad(d.getHours())+':'+str_pad(d.getMinutes()));
+	$(input).val(d);
+	$(div).append(input);
+
+	var div2 = $("<div></div>");
+	$(div2).hide();
+	var input2 = $( '<input type="text" class="form-control datetimepicker"></input>' );
+	
+	$(div2).prepend("<label>Event End</label>");
+	$(input2).attr('name','enddate');
+
+	var d = d = new Date();
+	d = (d.getFullYear()+"-"+str_pad(d.getMonth()+1)+'-'+str_pad(d.getDate())
+		+' '+str_pad(d.getHours())+':'+str_pad(d.getMinutes()));
+	$(input2).val(d);
+	$(div2).append(input2);
+
+	var eventTypes = {'Clock In':'clockin','Clock Out':'clockout','Break':'break'};
+	var select = $("<select name='type'></select>");
+	$.each(eventTypes,function(eName,eCode){
+		$(select).append("<option value='"+eCode+"'>"+eName+"</option>");
+	});
+	$(select).click(function(e){
+		var selected = $(this).find(':selected');
+		if (selected.length) {
+			if ($(selected).val() == 'break') {
+				$('#eventModal').find("[name='enddate']").parent().show();
+			} else {
+				$('#eventModal').find("[name='enddate']").parent().hide();
+			}
+		}
+	});
+	$(modal).find('.modal-body').append(select);
+	$(modal).find('.modal-body').append(div);
+	$(modal).find('.modal-body').append(div2);
+
+	$(modal).find('.btn-danger').hide();
+	$(modal).find('.btn-primary').text("Create Event");
+	$(modal).find('.modal-title').text("Create Event");
+
+	$(modal).find('.btn-danger').off('click');
+	$(modal).find('.btn-primary').off('click');
+	$(modal).find('.btn-primary').click(function(e){
+		confirmAction('Are you sure you want to create this event?',function(){afterCreateEvent()});
+	});
+
+	$('.datetimepicker').datetimepicker({
+		'dateFormat':'yy-mm-dd' 
+	});
+	$(modal).modal();
+}
+
+function afterCreateEvent() {
+	var modalBody = $('#eventModal').find('.modal-body');
+	var events = [];
+	var type = $(modalBody).find("[name='type']").val();
+	var staffID = $(modalBody).find("[name='staff_id']").val();
+	var startDate =  $(modalBody).find("[name='startdate']").val();
+	var endDate =  $(modalBody).find("[name='enddate']").val();
+
+	switch (type) {
+		case 'break'	:	events.push({'action':'breakstart','time':startDate,'staff_id':staffID});
+							events.push({'action':'breakend','time':endDate,'staff_id':staffID});
+							break;
+		case 'clockin'	:	events.push({'action':'clockin','time':startDate,'staff_id':staffID});
+							break;
+		case 'clockout':	events.push({'action':'clockout','time':startDate,'staff_id':staffID});
+							break;
+
+		default : alert("Error: unknown type, not saving");
+					return;
+	}
+console.log(events);
+    $.ajax({
+       type:'POST',
+       url:'/ajax/back',
+       data:{'events':events,'request':'createEvents'},
+       success:function(data){
+       console.log(data);
+       		if (data.success) {
+       			alert(data.success);
+       			location.reload();
+       		}
+       		if (data.errors) {
+       			alert(data.errors);
+	       	}
+    	}
+	});
+}
+
+function afterDeleteEvents(events) {
+console.log('sending');
+console.log(events);
+    $.ajax({
+       type:'POST',
+       url:'/ajax/back',
+       data:{'events':events,'request':'deleteEvents'},
+       success:function(data){
+       console.log(data);
+       		if (data.success) {
+       			alert(data.success);
+       			location.reload();
+       		}
+       		if (data.errors) {
+       			alert(data.errors);
+	       	}
+    	}
+	});
+}
+
+function afterEditEvents(events) {
+
+	$.each(events,function(id,event){
+		newDate = $('#eventModal').find("input[id="+event['id']+"]");
+
+		if (newDate.length) {
+			event['time'] = newDate.val();
+		}
+		if (!newDate.length || !newDate.val()) {
+			return alert("Error: missing date info");
+		}
+	});
+
+    $.ajax({
+       type:'POST',
+       url:'/ajax/back',
+       data:{'events':events,'request':'editEvents'},
+       success:function(data){
+       console.log(data);
+       		if (data.success) {
+       			alert(data.success);
+       			location.reload();
+       		}
+       		if (data.errors) {
+       			alert(data.errors);
+	       	}
+    	}
+	});
+}
+
+function confirmAction(msg,afterFunc) {
+	var r = confirm(msg);
+	if (r == true)
+		afterFunc();
+
+}
+
+function editEvent(type,events) {
+
+	getEventDetails(type,events);
+
+	return false;
+}
+@endsection

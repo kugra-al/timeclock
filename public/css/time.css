@@ -1,0 +1,45 @@
+.clockin {     color: #155724;
+    background-color: #d4edda;
+    border-color: #c3e6cb;
+}
+.clockout,tr.errors {        color: #721c24;
+    background-color: #f8d7da;
+    border-color: #f5c6cb;}
+.breakstart {    color: #0c5460;
+    background-color: #d1ecf1;
+    border-color: #bee5eb;}
+.breakend{           color: #856404;
+    background-color: #fff3cd;
+    border-color: #ffeeba;}
+.clockinfo {
+	    color: #004085;
+    background-color: #cce5ff;
+    border-color: #b8daff;
+}
+.clockcancel {
+    color: #211e1e;
+    background-color: #c7b8b9;
+    border-color: #f5c6cb;
+}
+
+.clockin,.clockout,.breakstart,.breakend,.clockinfo,.clockdeletelast,.clockcancel{
+	text-align: center;
+	border:1px solid;
+}
+.clockin.disabled,.clockout.disabled,
+.breakstart.disabled,.breakend.disabled,
+.clockinfo.disabled,.clockdeletelast.disabled,.clockcancel.disabled{
+    color: #000; /* Fallback for older browsers */
+    color: rgba(0, 0, 0, 0);
+    background: #d6d8d9 url('/images/disabled.png') no-repeat center;
+    border-color: #1b1e21;
+}
+.big-spacer { margin-top: 40px;margin-bottom: 40px; }
+.right{float:right;text-align:right;}
+
+.left{float:left;text-align:left;}
+
+.timeTotal {font-size:32px;}
+.timeSubtotal {font-size: 24px;}
+.table thead th { text-align: center; }
+

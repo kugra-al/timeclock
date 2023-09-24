@@ -1,0 +1,224 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Validator;
+use Illuminate\Http\Request;
+
+use App\Staff;
+use App\Clock;
+use App\User;
+
+class StaffController extends Controller
+{
+    /**
+     * Display a listing of the resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function index()
+    {
+        // $staff = Staff::get();
+        // foreach($staff as $sta) {
+        //     $sta->addTestFields();
+        //     $sta->clockIn();
+        // }
+        $hours = $this->getAllHoursForWeek();
+        $staff = Staff::paginate();
+        return view('admin.staff.index',['staff'=>$staff,'hours'=>$hours]);
+        //
+    }
+
+    public function getHoursFromEvents ($eventsCol,$breakdown = false) {
+        $minuteCount = 0;
+        $breakMinuteCount = 0;
+        $breakAmt = 0;
+        $dayAmt = 0;
+        $tmpClock = array('start'=>0,'end'=>0);
+
+        foreach($eventsCol as $year=>$events) {
+            $dayAmt = count($events);
+            foreach($events as $day => $event) {
+                foreach($event['clocks'] as $clock) {
+                    if ($clock->action == "clockin")
+                        $tmpClock['start'] = $clock->time;
+                    if ($tmpClock['start'] && $clock->action == "clockout") {
+                        $diff = \Carbon\Carbon::parse($tmpClock['start'])->diffInMinutes(\Carbon\Carbon::parse($clock->time));
+                        $minuteCount += $diff;
+                        $tmpClock = array('start'=>0,'end'=>0);
+                    }
+                }
+                foreach($event['breaks'] as $break) {
+                    if ($break['start'] && $break['end']) {
+                        $breakAmt++;
+                        $diff = \Carbon\Carbon::parse($break['start']->time)->diffInMinutes(\Carbon\Carbon::parse($break['end']->time));
+                        $breakMinuteCount+=$diff;
+                    }
+                }
+                
+            }
+        }
+
+        $hours = array();
+        //dd($this->convertMinsToTime($minuteCount-$breakMinuteCount));
+        $hours['hours'] = Staff::convertMinsToTime($minuteCount-$breakMinuteCount);
+        $hours['breakMinutes'] = Staff::convertMinsToTime($breakMinuteCount);
+        $hours['breaks'] = $breakAmt;
+        $hours['days'] = $dayAmt;
+        return $hours;
+    }
+
+
+
+    public function getAllHoursForWeek ($staff = 0, $breakdown = false) {
+
+        $dates = Clock::getDefaultDates();
+        if (!$staff)
+            $staff = Staff::get();
+        else
+            $staff = Staff::where('id',$staff)->get();
+        $hours = array();
+        foreach($staff as $member) {
+            $eventsLastWeek = $member->getEventsSince($dates['last week'],$dates['this week']);
+            $eventsThisWeek = $member->getEventsSince($dates['this week'],$dates['now']);
+            $hours[$member->id] = array('lastWeek'=>0,'thisWeek'=>0);
+            
+            // Add a fake clockout event if today it's today so we can get accurate hours for the week
+            $now = \Carbon\Carbon::now();
+            $year = $now->year;
+            $day = $now->dayOfYear;
+            if (isset($eventsThisWeek[$year][$day])) {
+                $check = $eventsThisWeek[$year][$day];
+                $hasClockout = false;
+                foreach($check['clocks'] as $clock) {
+                    if($clock->action == 'clockout')
+                        $hasClockout = true;
+                }
+                if (!$hasClockout) {
+                    $clock = collect();
+                    $clock->time = \Carbon\Carbon::now();
+                    $clock->action = 'clockout';
+                    $eventsThisWeek[$year][$day]['clocks'][] = $clock;
+                    //dd($clock);
+                }
+                //dd($check);
+            }
+           //dd($eventsThisWeek);
+//dd($eventsThisWeek);
+            $hours[$member->id]['lastWeek'] = $this->getHoursFromEvents($eventsLastWeek,$breakdown);
+            $hours[$member->id]['thisWeek'] = $this->getHoursFromEvents($eventsThisWeek,$breakdown);
+
+        }
+        return $hours;
+
+    }
+    /**
+     * Show the form for creating a new resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function create()
+    {
+        //
+        return view('admin.staff.create');
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function store(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => 'required',
+            'pin' => 'required',
+        ]);
+
+        if ($validator->fails()) {
+            return redirect('/admin/staff/create')
+                ->withErrors($validator)
+                ->withInput();
+        }
+
+        $staff = new Staff;
+        $staff->name = $request->get('name');
+        $staff->pin  = $request->get('pin');
+        $staff->save();
+        return redirect('/admin/staff')->with('success','Staff member created');
+    }
+
+    /**
+     * Display the specified resource.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function show($id)
+    {
+        $events = $this->getAllHoursForWeek($id,true);
+
+
+        $staff = Staff::find($id);
+        $staffMembers = Staff::pluck('name','id');
+        $adminUsers = User::pluck('name','id')->toArray();
+       // $staff->addTestFields();
+        $dates = Clock::getDefaultDates();
+//        $fromDate = $dates['last week'];
+	$fromDate = \Carbon\Carbon::parse($dates['now'])->subWeeks(4)->toDateTimeString();
+        $toDate = $dates['now'];
+
+        return view('admin.staff.view',compact('staff','id','staffMembers','fromDate','toDate','adminUsers'));
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function edit($id)
+    {
+        $staff = Staff::find($id);
+        return view('admin.staff.edit',compact('staff','id'));
+    }
+
+    /**
+     * Update the specified resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function update(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => 'required',
+            'pin' => 'required',
+        ]);
+
+        if ($validator->fails()) {
+            return redirect('/admin/staff/'.$id.'/edit')
+                ->withErrors($validator)
+                ->withInput();
+        }
+
+        $staff = Staff::find($id);
+        $staff->name = $request->get('name');
+        $staff->pin  = $request->get('pin');
+        $staff->save();
+        return redirect('/admin/staff')->with('success','Staff member edited');
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function destroy($id)
+    {
+        //
+    }
+}
